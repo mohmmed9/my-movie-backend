@@ -2,18 +2,20 @@
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin'); 
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcrypt'); // لتشفير كلمات المرور
 
 const app = express();
-const port = process.env.PORT || 3001; // يستخدم منفذ Render أو 3001 محليًا
+// يستخدم منفذ Render (الـ Process) أو 3001 محليًا
+const port = process.env.PORT || 3001; 
 
 // ====== تهيئة Firebase والاتصال بقاعدة البيانات ======
+// هذا السطر يقرأ المفتاح السري من متغير البيئة الذي أنشأناه في Render
 const serviceAccountString = process.env.FIREBASE_SERVICE_ACCOUNT;
 let db = null;
 
 if (serviceAccountString) {
     try {
-        // قراءة المتغير السري وتحويله إلى كائن JSON
+        // قراءة المتغير السري (JSON) وتحويله
         const serviceAccount = JSON.parse(serviceAccountString); 
         admin.initializeApp({
             credential: admin.credential.cert(serviceAccount)
@@ -24,7 +26,7 @@ if (serviceAccountString) {
         console.error('Failed to parse or initialize Firebase:', error);
     }
 } else {
-    // هذا سيظهر في السجلات إذا لم يتم العثور على المتغير
+    // هذا سيظهر في السجلات إذا لم يتم إعداد متغير البيئة
     console.error('FIREBASE_SERVICE_ACCOUNT environment variable is not set. Database saving will fail.');
 }
 // =======================================================
@@ -55,7 +57,7 @@ app.post('/register', async (req, res) => {
             return res.status(409).json({ message: 'هذا البريد الإلكتروني مسجل بالفعل.' });
         }
 
-        // تشفير كلمة المرور (الأمان)
+        // تشفير كلمة المرور (الأمان الأهم)
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
@@ -63,7 +65,7 @@ app.post('/register', async (req, res) => {
         const newUser = {
             username: username,
             email: email,
-            password: hashedPassword,
+            password: hashedPassword, // حفظ الكلمة المشفرة
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         };
 
@@ -74,6 +76,7 @@ app.post('/register', async (req, res) => {
         });
 
     } catch (error) {
+        // إذا فشلت عملية الحفظ (مثلاً بسبب قواعد الأمان)
         console.error('Error during registration:', error);
         res.status(500).json({ message: 'حدث خطأ داخلي في الخادم أثناء عملية التسجيل.' });
     }
