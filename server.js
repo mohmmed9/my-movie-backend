@@ -4,7 +4,7 @@ const cors = require('cors');
 
 // 2. تشغيل التطبيق
 const app = express();
-const port = 3001; // المنفذ الذي نعمل عليه
+const port = process.env.PORT || 3001; // المنفذ الذي نعمل عليه
 
 // 3. إعدادات وسيطة (Middleware)
 app.use(cors()); // للسماح بالطلبات من مواقع أخرى (مثل Netlify)
@@ -39,5 +39,6 @@ app.post('/register', (req, res) => {
 app.listen(port, () => {
   console.log(`تم تشغيل الخادم بنجاح على http://localhost:${port}`);
 });
+
 
 // --- نهاية الملف ---
