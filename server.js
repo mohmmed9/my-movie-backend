@@ -2,7 +2,7 @@
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin'); 
-const bcrypt = require('bcrypt'); // لتشفير كلمات المرور
+const bcrypt = require('bcryptjs'); // <--- لاحظ إضافة js // لتشفير كلمات المرور
 
 const app = express();
 // يستخدم منفذ Render (الـ Process) أو 3001 محليًا
