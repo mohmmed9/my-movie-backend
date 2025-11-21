@@ -1,121 +1,133 @@
-// استيراد مكتبات Node.js الأساسية والمكتبات التي قمنا بتثبيتها
+// استيراد المكتبات
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin'); 
-const bcrypt = require('bcryptjs'); // <-- الحل النهائي للتشفير
-const fs = require('fs'); // <--- لقراءة الملفات (مفتاح سري)
-const path = require('path'); // <--- للتعامل مع مسارات الملفات
+const bcrypt = require('bcryptjs'); // تأكد من أنها bcryptjs
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
-// المنفذ الذكي (يستخدم منفذ Render أو 3001 محليًا)
-const port = process.env.PORT || 3001; 
+const port = process.env.PORT || 3001;
 
-// ====== تهيئة Firebase والاتصال بقاعدة البيانات من الملف السري ======
+// ====== تهيئة Firebase ======
+// قراءة الملف السري سواء محلياً أو على سيرفر Render
+const secretFilePath = process.env.RENDER ? path.join('/etc/secrets', 'firebase_key.json') : path.join(__dirname, 'firebase_key.json');
 let db = null;
-const isRenderEnvironment = process.env.RENDER ? true : false;
-
-// المسار المتوقع للملف السري على Render (الذي أنشأناه يدوياً)
-// إذا كان في Render: المسار سيكون /etc/secrets/...
-// إذا كان محليًا: سيحاول قراءة ملف محلي اسمه firebase_key.json (للتجربة)
-const secretFilePath = isRenderEnvironment 
-    ? path.join('/etc/secrets', 'firebase_key.json') 
-    : path.join(__dirname, 'firebase_key.json');
 
 try {
-    const serviceAccountData = fs.readFileSync(secretFilePath, 'utf8');
-    const serviceAccount = JSON.parse(serviceAccountData);
-    
-    admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-    });
-    db = admin.firestore();
-    console.log('Firebase initialized successfully from Secret File!');
-
-} catch (error) {
-    console.error('FIREBASE CONNECTION FAILED (Error in key or path):', error.message);
-    if (!isRenderEnvironment) {
-         console.warn('NOTE: This error is expected when running locally unless you place the JSON file in the root directory.');
+    if (fs.existsSync(secretFilePath)) {
+        const serviceAccountData = fs.readFileSync(secretFilePath, 'utf8');
+        const serviceAccount = JSON.parse(serviceAccountData);
+        
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount)
+        });
+        db = admin.firestore();
+        console.log('Firebase initialized successfully!');
+    } else {
+        // محاولة القراءة من متغير البيئة كخطة بديلة
+        const envVar = process.env.FIREBASE_SERVICE_ACCOUNT;
+        if(envVar) {
+             admin.initializeApp({ credential: admin.credential.cert(JSON.parse(envVar)) });
+             db = admin.firestore();
+             console.log('Firebase initialized from ENV variable!');
+        } else {
+             console.error('Firebase Key not found!');
+        }
     }
+} catch (error) {
+    console.error('Firebase Error:', error.message);
 }
-// =======================================================================
+// ==========================
 
-// استخدام Middlewares
 app.use(cors());
 app.use(express.json());
 
-// مسار رئيسي للتحقق من أن الخادم يعمل
 app.get('/', (req, res) => {
-    res.send('أهلاً بك، الخادم يعمل بشكل صحيح ومرتبط بـ Firebase!');
+    res.send('Server is running with Login feature!');
 });
 
-// --- مسار جلب وعرض الأعمال (GET /api/works) ---
+// --- 1. مسار جلب الأعمال (للعرض) ---
 app.get('/api/works', async (req, res) => {
-    if (!db) {
-        return res.status(500).json({ message: 'فشل الاتصال بقاعدة البيانات. المفتاح السري مفقود.' });
-    }
-    
+    if (!db) return res.status(500).json({ message: 'Database Error' });
     try {
-        const worksCollection = db.collection('works');
-        const snapshot = await worksCollection.get();
-        
-        const works = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        }));
-        
+        const snapshot = await db.collection('works').get();
+        const works = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         res.json(works);
-
     } catch (error) {
-        console.error('Error fetching works:', error);
-        res.status(500).json({ message: 'حدث خطأ أثناء جلب الأعمال.' });
+        res.status(500).json({ message: 'Error fetching works' });
     }
 });
 
-
-// مسار تسجيل المستخدم (POST /register) - لحفظ البيانات في Firestore
+// --- 2. مسار إنشاء حساب (Register) ---
 app.post('/register', async (req, res) => {
     const { username, email, password } = req.body;
-
-    if (!db) {
-        return res.status(500).json({ message: 'فشل الاتصال بقاعدة البيانات. المفتاح السري مفقود.' });
-    }
+    if (!db) return res.status(500).json({ message: 'Database Error' });
 
     try {
-        // التحقق من وجود المستخدم مسبقًا
         const usersRef = db.collection('users');
         const userExists = await usersRef.where('email', '==', email).get();
 
         if (!userExists.empty) {
-            return res.status(409).json({ message: 'هذا البريد الإلكتروني مسجل بالفعل.' });
+            return res.status(409).json({ message: 'البريد الإلكتروني مستخدم بالفعل.' });
         }
 
-        // تشفير كلمة المرور (الأمان)
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
-        // حفظ المستخدم الجديد في Firestore
-// 4. إنشاء وحفظ المستخدم في Firestore
-        const newUser = {
-            username: username,
-            email: email,
-            password: hashedPassword, // حفظ الكلمة المشفرة
+        await usersRef.add({
+            username,
+            email,
+            password: hashedPassword,
             createdAt: admin.firestore.FieldValue.serverTimestamp()
-        };
+        });
 
-        const docRef = await db.collection('users').add(newUser);
+        res.status(201).json({ message: 'تم إنشاء الحساب بنجاح! يمكنك تسجيل الدخول الآن.' });
 
-        // 5. إرسال رد ناجح للواجهة الأمامية
-        res.status(201).json({ 
-            message: 'تهانينا! تم التسجيل بنجاح وتم حفظ بياناتك بشكل آمن.' 
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'حدث خطأ أثناء التسجيل.' });
+    }
+});
+
+// --- 3. مسار تسجيل الدخول (Login) - (جديد!) ---
+app.post('/login', async (req, res) => {
+    const { email, password } = req.body;
+    
+    if (!db) return res.status(500).json({ message: 'Database Error' });
+
+    try {
+        // 1. البحث عن المستخدم بالإيميل
+        const usersRef = db.collection('users');
+        const snapshot = await usersRef.where('email', '==', email).get();
+
+        if (snapshot.empty) {
+            return res.status(400).json({ message: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' });
+        }
+
+        // 2. التحقق من كلمة المرور
+        const userDoc = snapshot.docs[0];
+        const userData = userDoc.data();
+        
+        // مقارنة الكلمة المدخلة مع الكلمة المشفرة في قاعدة البيانات
+        const isMatch = await bcrypt.compare(password, userData.password);
+
+        if (!isMatch) {
+            return res.status(400).json({ message: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' });
+        }
+
+        // 3. نجاح الدخول
+        res.json({ 
+            message: `أهلاً بك مجدداً، ${userData.username}!`,
+            username: userData.username
         });
 
     } catch (error) {
-        console.error('Error during registration:', error);
-        res.status(500).json({ message: 'حدث خطأ داخلي في الخادم أثناء عملية التسجيل.' });
+        console.error('Login Error:', error);
+        res.status(500).json({ message: 'حدث خطأ أثناء تسجيل الدخول.' });
     }
-}); // <--- (يغلق مسار /register)
+});
 
-// تشغيل الخادم
 app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
-}); // <--- (يغلق ملف server.js)
+    console.log(`Server running on port ${port}`);
+});
